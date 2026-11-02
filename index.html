@@ -282,6 +282,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     S.updatedAt = Date.now();
     saveLocal();
     queueCloud();
+    syncHash();
     if (rerender !== false) render();
   }
 
@@ -606,7 +607,6 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
         h += '<div class="field"><div class="t">Nombre de rounds<small>' + (lastScored() >= 0 ? 'Les rounds joués restent' : 'Ajuste si besoin') + '</small></div>' + stepper('rounds', S.rounds.length, Math.max(1, lastScored() + 1), 40, false) + '</div>';
         h += '<div class="summary"><div class="stat"><b>' + S.rounds.length + '</b><span>rounds</span></div><div class="stat"><b>' + totalM + '</b><span>matchs</span></div><div class="stat"><b>' + S.courts + '</b><span>terrain' + (S.courts > 1 ? 's' : '') + '</span></div></div>';
         h += '<button type="button" class="btn primary block" data-tab="rounds">Voir les rounds</button>';
-        if (!window.claude) h += '<button type="button" class="btn" data-act="sharelink">Copier le lien du tournoi (autre téléphone)</button>';
         h += '<button type="button" class="btn ghost danger" data-act="regen">Recommencer le programme</button>';
       } else {
         h += '<div class="field"><div class="t">Nombre de rounds<small>' + (S.roundsWanted ? 'Personnalisé' : (isP ? 'Toutes les paires se rencontrent' : 'Conseillé pour ' + n + ' joueurs')) + '</small></div>' + stepper('rounds', R, 1, 40, false) + '</div>';
@@ -617,6 +617,13 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
       }
     }
     h += '</section>';
+    if (canLink) {
+      h += '<section class="card"><h2>Partager le tournoi</h2><p class="hint">Le lien contient les paires, les rounds et les scores. Il ouvre ce tournoi sur un autre téléphone.</p>' +
+        '<button type="button" class="btn ball" data-act="sharelink" ' + (isEmpty() ? 'disabled' : '') + '>Copier le lien du tournoi</button>' +
+        '<div class="label">Charger un tournoi reçu</div><p class="hint">Sur iPhone, l’app de l’écran d’accueil et Safari ont chacune leur mémoire. Colle ici le lien reçu pour l’ouvrir dans l’app.</p>' +
+        '<input type="text" id="f-import" placeholder="Colle le lien (…#t=…)" autocomplete="off" autocapitalize="off" spellcheck="false">' +
+        '<button type="button" class="btn" data-act="importlink">Charger ce tournoi</button></section>';
+    }
     h += '<section class="card"><h2>Nouveau tournoi</h2><p class="hint">Efface les participants, les rounds et les scores de ce tournoi.</p><button type="button" class="btn ghost danger" data-act="reset">Tout effacer</button></section>';
     return h;
   }
@@ -852,6 +859,11 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
         m.sa = null; m.sb = null; closeLayer(); edit = null; commit(); break;
       }
       case 'sharelink': copyText(exportLink()); break;
+      case 'importlink': {
+        const c = codeFrom($('#f-import').value);
+        if (!c) { toast('Colle le lien complet du tournoi (il contient #t=)'); return; }
+        handleImport(c, true); break;
+      }
       case 'copyround': {
         const r = S.rounds[UI.round];
         let t = '🎾 ' + (S.name || 'Americano') + ' — Round ' + r.n + '\n';
@@ -871,20 +883,45 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
   });
 
   // ---------- share a tournament by link (#t=...) ----------
-  const b64e = str => btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  const b64d = str => decodeURIComponent(escape(atob(str.replace(/-/g, '+').replace(/_/g, '/'))));
-  function exportLink() {
+  // The address always carries the current tournament, so sharing the page from Safari also shares it.
+  function b64e(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+  function b64d(str) { return decodeURIComponent(escape(atob(str.replace(/-/g, '+').replace(/_/g, '/')))); }
+  const canLink = !window.claude && /^https?:$/.test(location.protocol);
+  function isEmpty() { return !S.rounds.length && !participants().some(p => named(p.p1) || named(p.p2) || named(p.name)); }
+  function stateCode() {
     const list = participants(), idx = {}; list.forEach((p, i) => { idx[p.id] = i; });
     const d = { n: S.name, m: S.mode, c: S.courts, p: S.points,
       P: S.mode === 'pairs' ? list.map(p => [p.p1, p.p2]) : list.map(p => p.name),
       R: S.rounds.map(r => r.matches.map(m => [m.a.map(x => idx[x]), m.b.map(x => idx[x]), m.sa, m.sb])) };
-    return location.origin + location.pathname + '#t=' + b64e(JSON.stringify(d));
+    return b64e(JSON.stringify(d));
   }
-  function readImport() {
-    const h = location.hash;
-    if (!h || h.indexOf('#t=') !== 0) return null;
+  function exportLink() { return location.origin + location.pathname + '#t=' + stateCode(); }
+  // fingerprints of the addresses this phone wrote itself, so an old address of our own is never treated as a received link
+  const OWNKEY = 'padellos-americano-own';
+  function fp(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+  function ownList() { try { return JSON.parse(localStorage.getItem(OWNKEY) || '[]'); } catch (e) { return []; } }
+  function rememberOwn(code) { try { const l = ownList().filter(x => x !== fp(code)); l.push(fp(code)); localStorage.setItem(OWNKEY, JSON.stringify(l.slice(-200))); } catch (e) {} }
+  let hashT = null;
+  function writeHash() {
+    clearTimeout(hashT); hashT = null;
+    if (!canLink) return;
     try {
-      const d = JSON.parse(b64d(h.slice(3)));
+      if (isEmpty()) { history.replaceState(null, '', location.pathname + location.search); return; }
+      const code = stateCode(); rememberOwn(code);
+      history.replaceState(null, '', location.pathname + location.search + '#t=' + code);
+    } catch (e) {}
+  }
+  function syncHash() {
+    if (!canLink) return;
+    clearTimeout(hashT);
+    hashT = setTimeout(writeHash, 250);
+  }
+  window.addEventListener('pagehide', () => { if (hashT) writeHash(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && hashT) writeHash(); });
+  function decodeCode(code) {
+    try {
+      const d = JSON.parse(b64d(code));
+      if (!d || !Array.isArray(d.P)) return null;
       const t = blank(); t.name = d.n || ''; t.mode = d.m === 'classic' ? 'classic' : 'pairs';
       t.courts = Math.max(1, Math.min(4, +d.c || 2)); t.points = POINTS.includes(+d.p) ? +d.p : 21;
       let ids;
@@ -892,25 +929,36 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
       else { t.players = d.P.map(n => ({ id: uid(), name: n || '' })); t.pairs = []; ids = t.players.map(p => p.id); }
       t.rounds = (d.R || []).map((ms, i) => {
         const used = new Set();
-        const matches = ms.map((m, j) => { const a = m[0].map(k => ids[k]), b = m[1].map(k => ids[k]); a.concat(b).forEach(x => used.add(x)); return { id: uid(), court: j + 1, a, b, sa: m[2] == null ? null : +m[2], sb: m[3] == null ? null : +m[3] }; });
+        const matches = ms.map((m, j) => {
+          const a = m[0].map(k => ids[k]), b = m[1].map(k => ids[k]);
+          if (a.concat(b).some(x => !x)) throw new Error('bad index');
+          a.concat(b).forEach(x => used.add(x));
+          return { id: uid(), court: j + 1, a, b, sa: m[2] == null ? null : +m[2], sb: m[3] == null ? null : +m[3] };
+        });
         return { n: i + 1, courts: t.courts, rest: ids.filter(x => !used.has(x)), matches };
       });
       return t;
     } catch (e) { return null; }
   }
-  function handleImport() {
-    const imported = readImport();
-    if (!imported) return;
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
-    const applyImport = () => { S = imported; UI.tab = imported.rounds.length ? 'rounds' : 'setup'; UI.round = 0; saveUI(); commit(); window.scrollTo(0, 0); toast('Tournoi chargé'); };
-    const busy = S.rounds.length > 0 || participants().some(p => named(p.p1) || named(p.p2) || named(p.name));
-    if (busy) confirmBox('Charger ' + (imported.name || 'ce tournoi'), 'Le tournoi en cours sur ce téléphone sera remplacé par celui du lien.', 'Charger', applyImport);
+  function codeFrom(text) {
+    const i = (text || '').indexOf('#t=');
+    return i < 0 ? null : text.slice(i + 3).replace(/\s+/g, '');
+  }
+  function handleImport(code, fromPaste) {
+    if (!code) return;
+    if (code === stateCode()) { if (fromPaste) toast('Ce tournoi est déjà chargé'); return; }
+    if (!fromPaste && ownList().includes(fp(code))) { writeHash(); return; }
+    const t = decodeCode(code);
+    if (!t) { toast('Lien incomplet : renvoie le lien en entier'); syncHash(); return; }
+    const applyImport = () => { S = t; UI.tab = t.rounds.length ? 'rounds' : 'setup'; UI.round = 0; saveUI(); commit(); window.scrollTo(0, 0); toast('Tournoi chargé : ' + (t.name || 'tournoi')); };
+    syncHash();
+    if (!isEmpty()) confirmBox('Charger ' + (t.name || 'ce tournoi'), 'Le tournoi en cours sur ce téléphone sera remplacé par celui du lien.', 'Charger', applyImport);
     else applyImport();
   }
-  window.addEventListener('hashchange', handleImport);
+  window.addEventListener('hashchange', () => handleImport(codeFrom(location.hash)));
 
   render();
-  handleImport();
+  if (codeFrom(location.hash)) handleImport(codeFrom(location.hash)); else syncHash();
   const chip = document.querySelector('.rchip[aria-current=true]'); if (chip) chip.scrollIntoView({ inline: 'center', block: 'nearest' });
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) { navigator.serviceWorker.register('sw.js').catch(() => {}); }
 })();
