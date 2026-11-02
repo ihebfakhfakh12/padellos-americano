@@ -454,6 +454,32 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     }
     return rounds;
   }
+  function permutations(n) {
+    const res = [], a = [...Array(n).keys()];
+    const rec = k => { if (k === n) { res.push(a.slice()); return; } for (let i = k; i < n; i++) { [a[k], a[i]] = [a[i], a[k]]; rec(k + 1); [a[k], a[i]] = [a[i], a[k]]; } };
+    rec(0); return res;
+  }
+  // spread every pair / player over all the courts instead of always the same one
+  function balanceCourts(raw, prior) {
+    const cnt = {};
+    const get = (id, c) => (cnt[id] && cnt[id][c]) || 0;
+    const add = (id, c) => { cnt[id] = cnt[id] || {}; cnt[id][c] = get(id, c) + 1; };
+    (prior || []).forEach(r => r.matches.forEach(m => m.a.concat(m.b).forEach(id => add(id, m.court))));
+    return raw.map(r => {
+      const n = r.matches.length;
+      const perms = n <= 5 ? permutations(n) : [[...Array(n).keys()]];
+      let best = perms[0], bc = Infinity;
+      for (const pm of perms) {
+        let c = 0;
+        r.matches.forEach((m, i) => m[0].concat(m[1]).forEach(id => { const v = get(id, pm[i] + 1); c += v * v + v; }));
+        if (c < bc) { bc = c; best = pm; }
+      }
+      const ordered = [];
+      r.matches.forEach((m, i) => { ordered[best[i]] = m; });
+      ordered.forEach((m, ci) => m[0].concat(m[1]).forEach(id => add(id, ci + 1)));
+      return { matches: ordered, rest: r.rest };
+    });
+  }
   function defaultRounds(s) {
     const ids = participants(s).map(p => p.id);
     if (s.mode === 'pairs') { if (ids.length < 2) return 1; return schedulePairs(ids, s.courts, 999, true).length; }
@@ -465,7 +491,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     const ids = participants(s).map(p => p.id);
     const R = roundsCount(s);
     const raw = s.mode === 'pairs' ? schedulePairs(ids, s.courts, R, false) : scheduleClassic(ids, s.courts, R);
-    return toRounds(raw, 1);
+    return toRounds(balanceCourts(raw, []), 1);
   }
   function toRounds(raw, startN) {
     return raw.map((r, i) => ({ n: startN + i, courts: S ? S.courts : 2, rest: r.rest, matches: r.matches.map((m, j) => ({ id: uid(), court: j + 1, a: m[0], b: m[1], sa: null, sb: null })) }));
@@ -488,7 +514,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
         raw = scheduleClassic(ids, S.courts, Math.max(0, target - kept.length), kept);
       }
     }
-    S.rounds = kept.concat(toRounds(raw, kept.length + 1));
+    S.rounds = kept.concat(toRounds(balanceCourts(raw, kept), kept.length + 1));
     S.rounds.forEach((r, i) => { r.n = i + 1; });
     if (UI.round >= S.rounds.length) UI.round = Math.max(0, S.rounds.length - 1);
     saveUI();
@@ -620,6 +646,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     if (canLink) {
       h += '<section class="card"><h2>Partager le tournoi</h2><p class="hint">Le lien contient les paires, les rounds et les scores. Il ouvre ce tournoi sur un autre téléphone.</p>' +
         '<button type="button" class="btn ball" data-act="sharelink" ' + (isEmpty() ? 'disabled' : '') + '>Copier le lien du tournoi</button>' +
+        (published.length ? '<div class="label">Tournois Padellos</div>' + published.map(t => '<div class="field"><div class="t">' + esc(t.titre) + '<small>' + esc(t.date || '') + '</small></div><button type="button" class="btn ball" data-load="' + esc(t.id) + '">Charger</button></div>').join('') : '') +
         '<div class="label">Charger un tournoi reçu</div><p class="hint">Sur iPhone, l’app de l’écran d’accueil et Safari ont chacune leur mémoire. Colle ici le lien reçu pour l’ouvrir dans l’app.</p>' +
         '<input type="text" id="f-import" placeholder="Colle le lien (…#t=…)" autocomplete="off" autocapitalize="off" spellcheck="false">' +
         '<button type="button" class="btn" data-act="importlink">Charger ce tournoi</button></section>';
@@ -797,6 +824,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
       return;
     }
     if (d.match != null) { openScore(+d.match); return; }
+    if (d.load) { const it = published.find(x => x.id === d.load); if (it) handleImport(it.code, true); return; }
     if (d.q != null) { const v = +d.q; edit.sa = v; edit.sb = S.points - v; drawScore(); return; }
     if (d.adj) {
       const k = d.adj === 'a' ? 'sa' : 'sb', o = d.adj === 'a' ? 'sb' : 'sa';
@@ -956,9 +984,22 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     else applyImport();
   }
   window.addEventListener('hashchange', () => handleImport(codeFrom(location.hash)));
+  let published = [];
+  async function loadPublished() {
+    if (!canLink) return;
+    try { const r = await fetch('tournois.json', { cache: 'no-store' }); if (r.ok) published = (await r.json()).tournois || []; } catch (e) {}
+    if (UI.tab === 'setup' && !$('#layer').innerHTML) render();
+  }
 
   render();
-  if (codeFrom(location.hash)) handleImport(codeFrom(location.hash)); else syncHash();
+  const shortId = canLink ? new URLSearchParams(location.search).get('t') : null;
+  if (shortId) {
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+    loadPublished().then(() => { const it = published.find(x => x.id === shortId); if (it) handleImport(it.code, true); else toast('Tournoi introuvable : vérifie le lien'); });
+  } else {
+    if (codeFrom(location.hash)) handleImport(codeFrom(location.hash)); else syncHash();
+    loadPublished();
+  }
   const chip = document.querySelector('.rchip[aria-current=true]'); if (chip) chip.scrollIntoView({ inline: 'center', block: 'nearest' });
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) { navigator.serviceWorker.register('sw.js').catch(() => {}); }
 })();
