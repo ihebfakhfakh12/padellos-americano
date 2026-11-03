@@ -208,16 +208,21 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
 .qgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .qgrid button { border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; height: 44px; font-family: var(--display); font-weight: 700; font-size: 20px; font-variant-numeric: tabular-nums; }
 .qgrid button[aria-pressed=true] { background: var(--ball); color: var(--ball-ink); border-color: var(--ball); }
-.edit2 { display: grid; gap: 10px; }
-.erow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--surface-2); border-radius: 12px; padding: 8px 8px 8px 12px; }
-.erow .tn { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
-.big { display: inline-flex; align-items: center; gap: 4px; }
-.big button { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 22px; font-weight: 700; }
-.big output { min-width: 54px; text-align: center; font-family: var(--display); font-weight: 800; font-size: 36px; font-variant-numeric: tabular-nums; }
+.tpanel { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; text-align: left; background: var(--surface-2); border: 2px solid transparent; border-radius: 14px; padding: 12px 14px; }
+.tpanel.on { border-color: var(--gold); background: var(--surface); }
+.tpanel .tpn { font-weight: 700; font-size: 17px; overflow-wrap: anywhere; min-width: 0; line-height: 1.25; }
+.tpanel .tpn small { display: block; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.tpanel.on .tpn small { color: var(--gold); }
+.tpanel .tps { font-family: var(--display); font-weight: 800; font-size: 44px; min-width: 64px; text-align: center; line-height: 1; padding: 6px 8px; border-radius: 12px; background: var(--bg); font-variant-numeric: tabular-nums; }
+.tpanel.w .tps { background: var(--ball); color: var(--ball-ink); }
+.verdict { text-align: center; font-weight: 700; font-size: 16px; }
+.verdict.muted { color: var(--muted); font-weight: 500; font-size: 14px; }
+.free { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.free input { width: 22px; height: 22px; accent-color: var(--gold); }
 .total { font-size: 14px; text-align: center; color: var(--muted); }
 .total.warn { color: var(--gold); }
 .acts { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
-.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 14px; z-index: 30; max-width: calc(100% - 32px); text-align: center; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); top: calc(76px + env(safe-area-inset-top, 0px)); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 14px; z-index: 30; max-width: calc(100% - 32px); text-align: center; }
 </style>
 
 <div class="wrap">
@@ -227,7 +232,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
       <h1>Padellos <span>Americano</span></h1>
       <div class="sub" id="tname"></div>
     </div>
-    <div class="sync" id="sync" aria-live="polite"><span class="dot"></span><span>Sur cet appareil</span></div>
+    <div class="sync" id="sync" aria-live="polite" hidden></div>
   </header>
   <main id="main"></main>
 </div>
@@ -282,7 +287,6 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     S.updatedAt = Date.now();
     saveLocal();
     queueCloud();
-    syncHash();
     if (rerender !== false) render();
   }
 
@@ -296,7 +300,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
       off: ['off', 'Hors ligne · gardé sur l’iPhone']
     };
     const [c, t] = map[kind] || map.local;
-    $('#sync').innerHTML = '<span class="dot ' + c + '"></span><span>' + t + '</span>';
+    const el = $('#sync'); el.hidden = false; el.innerHTML = '<span class="dot ' + c + '"></span><span>' + t + '</span>';
   }
   function queueCloud() {
     if (!cloud.ref) return;
@@ -591,6 +595,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     const locked = S.rounds.length > 0;
     const plist = participants();
     let h = '';
+    if (!isEmpty()) h += '<div class="row between card" style="padding-block:12px"><span class="hint" style="font-size:14px">Tournoi en cours sur ce téléphone</span><button type="button" class="btn ghost danger" data-act="reset">Nouveau tournoi</button></div>';
     h += '<section class="card"><h2>Tournoi</h2><input type="text" id="f-name" value="' + esc(S.name) + '" placeholder="Nom du tournoi (ex. Americano P25 Hommes)" autocomplete="off"></section>';
     h += '<section class="card"><h2>Format</h2><div class="seg" role="group" aria-label="Format">' +
       '<button type="button" data-mode="pairs" aria-pressed="' + (S.mode === 'pairs') + '">Paires fixes</button>' +
@@ -644,14 +649,12 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     }
     h += '</section>';
     if (canLink) {
-      h += '<section class="card"><h2>Partager le tournoi</h2><p class="hint">Le lien contient les paires, les rounds et les scores. Il ouvre ce tournoi sur un autre téléphone.</p>' +
+      h += '<section class="card"><h2>Autre téléphone</h2><p class="hint">Copie le lien du tournoi (paires, rounds et scores) et envoie-le par WhatsApp.</p>' +
         '<button type="button" class="btn ball" data-act="sharelink" ' + (isEmpty() ? 'disabled' : '') + '>Copier le lien du tournoi</button>' +
-        (published.length ? '<div class="label">Tournois Padellos</div>' + published.map(t => '<div class="field"><div class="t">' + esc(t.titre) + '<small>' + esc(t.date || '') + '</small></div><button type="button" class="btn ball" data-load="' + esc(t.id) + '">Charger</button></div>').join('') : '') +
-        '<div class="label">Charger un tournoi reçu</div><p class="hint">Sur iPhone, l’app de l’écran d’accueil et Safari ont chacune leur mémoire. Colle ici le lien reçu pour l’ouvrir dans l’app.</p>' +
+        '<div class="label">Ouvrir un lien reçu</div><p class="hint">Sur iPhone, l’app de l’écran d’accueil ne voit pas ce qui est ouvert dans Safari : colle le lien ici.</p>' +
         '<input type="text" id="f-import" placeholder="Colle le lien (…#t=…)" autocomplete="off" autocapitalize="off" spellcheck="false">' +
-        '<button type="button" class="btn" data-act="importlink">Charger ce tournoi</button></section>';
+        '<button type="button" class="btn" data-act="importlink">Ouvrir ce tournoi</button></section>';
     }
-    h += '<section class="card"><h2>Nouveau tournoi</h2><p class="hint">Efface les participants, les rounds et les scores de ce tournoi.</p><button type="button" class="btn ghost danger" data-act="reset">Tout effacer</button></section>';
     return h;
   }
 
@@ -717,24 +720,37 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
   let edit = null;
   function openScore(j) {
     const m = S.rounds[UI.round].matches[j];
-    edit = { j, sa: m.sa, sb: m.sb };
+    edit = { r: UI.round, j, sa: m.sa, sb: m.sb, side: 'a', free: m.sa != null && m.sa + m.sb !== S.points };
     drawScore();
   }
   function drawScore() {
-    const r = S.rounds[UI.round], m = r.matches[edit.j], N = S.points;
-    const A = teamName(m.a), B = teamName(m.b);
-    const sa = edit.sa == null ? '–' : edit.sa, sb = edit.sb == null ? '–' : edit.sb;
-    const tot = (edit.sa || 0) + (edit.sb || 0);
+    const r = S.rounds[edit.r], m = r.matches[edit.j], N = S.points;
+    const names = { a: teamName(m.a), b: teamName(m.b) };
+    const val = { a: edit.sa, b: edit.sb };
     const both = edit.sa != null && edit.sb != null;
+    const panel = k => {
+      const o = k === 'a' ? 'b' : 'a';
+      const win = both && val[k] > val[o];
+      return '<button type="button" class="tpanel' + (edit.side === k ? ' on' : '') + (win ? ' w' : '') + '" data-side="' + k + '" aria-pressed="' + (edit.side === k) + '">' +
+        '<span class="tpn"><small>' + (edit.side === k ? 'Score en cours de saisie' : 'Toucher pour saisir') + '</small>' + esc(names[k]) + '</span>' +
+        '<span class="tps">' + (val[k] == null ? '–' : val[k]) + '</span></button>';
+    };
     let grid = '';
-    for (let i = 0; i <= N; i++) grid += '<button type="button" data-q="' + i + '" aria-pressed="' + (edit.sa === i) + '">' + i + '</button>';
-    $('#layer').innerHTML = '<div class="scrim" data-close="1"><div class="sheet" role="dialog" aria-modal="true" aria-label="Score"><div class="grab"></div>' +
-      '<div><div class="label">Round ' + r.n + ' · Terrain ' + m.court + ' · ' + N + ' points</div><h3 style="margin-top:4px">Score du match</h3></div>' +
-      '<div><p class="hint" style="margin-bottom:8px">Points de <b style="color:var(--fg)">' + esc(A) + '</b> — l’autre équipe est complétée automatiquement</p><div class="qgrid">' + grid + '</div></div>' +
-      '<div class="edit2"><div class="erow"><span class="tn">' + esc(A) + '</span><span class="big"><button type="button" data-adj="a" data-d="-1" aria-label="Moins">−</button><output>' + sa + '</output><button type="button" data-adj="a" data-d="1" aria-label="Plus">+</button></span></div>' +
-      '<div class="erow"><span class="tn">' + esc(B) + '</span><span class="big"><button type="button" data-adj="b" data-d="-1" aria-label="Moins">−</button><output>' + sb + '</output><button type="button" data-adj="b" data-d="1" aria-label="Plus">+</button></span></div></div>' +
-      (both ? '<div class="total' + (tot !== N ? ' warn' : '') + '">' + (tot === N ? 'Total ' + tot + ' / ' + N + ' ✓' : 'Total ' + tot + ' au lieu de ' + N + ' — accepté si le match s’est arrêté au temps') + '</div>' : '') +
-      '<div class="acts"><button type="button" class="btn ' + (m.sa != null ? 'danger' : '') + '" data-act="' + (m.sa != null ? 'clearscore' : 'cancel') + '">' + (m.sa != null ? 'Effacer' : 'Annuler') + '</button><button type="button" class="btn primary" data-act="savescore" ' + (both ? '' : 'disabled') + '>Enregistrer</button></div>' +
+    for (let i = 0; i <= N; i++) grid += '<button type="button" data-q="' + i + '" aria-pressed="' + (val[edit.side] === i) + '">' + i + '</button>';
+    let verdict;
+    if (!both) verdict = '<div class="verdict muted">Choisis une équipe puis touche ses points' + (edit.free ? '' : ' : l’autre équipe est complétée (total ' + N + ')') + '.</div>';
+    else if (edit.sa === edit.sb) verdict = '<div class="verdict">Match nul · ' + edit.sa + '–' + edit.sb + '</div>';
+    else verdict = '<div class="verdict">Vainqueur : ' + esc(edit.sa > edit.sb ? names.a : names.b) + ' · ' + Math.max(edit.sa, edit.sb) + '–' + Math.min(edit.sa, edit.sb) + '</div>';
+    const tot = (edit.sa || 0) + (edit.sb || 0);
+    $('#layer').innerHTML = '<div class="scrim" data-close="1"><div class="sheet" role="dialog" aria-modal="true" aria-label="Score du match"><div class="grab"></div>' +
+      '<div class="row between"><div><div class="label">Round ' + r.n + ' · Terrain ' + m.court + ' · ' + N + ' points</div><h3 style="margin-top:4px">Score du match</h3></div>' +
+      '<button type="button" class="btn ghost" data-act="swap" ' + (both ? '' : 'disabled') + ' aria-label="Inverser les deux scores">⇅ Inverser</button></div>' +
+      panel('a') + panel('b') +
+      '<div><div class="label" style="margin-bottom:8px">Points de ' + esc(names[edit.side]) + '</div><div class="qgrid">' + grid + '</div></div>' +
+      '<label class="free"><input type="checkbox" id="f-free" ' + (edit.free ? 'checked' : '') + '>Match arrêté au temps : saisir les deux scores séparément</label>' +
+      (edit.free && both ? '<div class="total' + (tot !== N ? ' warn' : '') + '">Total ' + tot + ' points' + (tot !== N ? ' (au lieu de ' + N + ')' : '') + '</div>' : '') +
+      verdict +
+      '<div class="acts"><button type="button" class="btn ' + (m.sa != null ? 'danger' : '') + '" data-act="' + (m.sa != null ? 'clearscore' : 'cancel') + '">' + (m.sa != null ? 'Effacer le score' : 'Annuler') + '</button><button type="button" class="btn primary" data-act="savescore" ' + (both ? '' : 'disabled') + '>Enregistrer</button></div>' +
       '</div></div>';
   }
 
@@ -754,6 +770,13 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
   }
 
   // ---------- events ----------
+  document.addEventListener('change', e => {
+    if (e.target.id === 'f-free' && edit) {
+      edit.free = e.target.checked;
+      if (!edit.free) { const k = edit.side === 'a' ? 'sa' : 'sb', o = edit.side === 'a' ? 'sb' : 'sa'; if (edit[k] != null) edit[o] = S.points - edit[k]; }
+      drawScore();
+    }
+  });
   document.addEventListener('input', e => {
     const t = e.target;
     if (t.id === 'f-name') { S.name = t.value; $('#tname').textContent = S.name || 'Nouveau tournoi'; commit(false); return; }
@@ -824,13 +847,12 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
       return;
     }
     if (d.match != null) { openScore(+d.match); return; }
-    if (d.load) { const it = published.find(x => x.id === d.load); if (it) handleImport(it.code, true); return; }
-    if (d.q != null) { const v = +d.q; edit.sa = v; edit.sb = S.points - v; drawScore(); return; }
-    if (d.adj) {
-      const k = d.adj === 'a' ? 'sa' : 'sb', o = d.adj === 'a' ? 'sb' : 'sa';
-      const cur = edit[k] == null ? 0 : edit[k];
-      edit[k] = Math.max(0, Math.min(99, cur + (+d.d)));
-      if (edit[o] == null) edit[o] = Math.max(0, S.points - edit[k]);
+    if (d.side && edit) { edit.side = d.side; drawScore(); return; }
+    if (d.q != null && edit) {
+      const v = +d.q, k = edit.side === 'a' ? 'sa' : 'sb', o = edit.side === 'a' ? 'sb' : 'sa';
+      edit[k] = v;
+      if (!edit.free) edit[o] = S.points - v;
+      else if (edit[o] == null) edit.side = edit.side === 'a' ? 'b' : 'a';
       drawScore(); return;
     }
 
@@ -875,16 +897,18 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
         });
         break;
       case 'cancel': closeLayer(); edit = null; break;
+      case 'swap': { const t = edit.sa; edit.sa = edit.sb; edit.sb = t; drawScore(); break; }
       case 'savescore': {
-        const m = S.rounds[UI.round].matches[edit.j];
+        const r = S.rounds[edit.r], m = r.matches[edit.j];
+        if (edit.sa == null || edit.sb == null) return;
         m.sa = edit.sa; m.sb = edit.sb; closeLayer(); edit = null; commit();
-        const r = S.rounds[UI.round];
-        if (r.matches.every(x => x.sa != null) && UI.round < S.rounds.length - 1) toast('Round ' + r.n + ' terminé');
+        if (r.matches.every(x => x.sa != null) && r.n < S.rounds.length) toast('Round ' + r.n + ' terminé');
+        else toast('Score enregistré');
         break;
       }
       case 'clearscore': {
-        const m = S.rounds[UI.round].matches[edit.j];
-        m.sa = null; m.sb = null; closeLayer(); edit = null; commit(); break;
+        const m = S.rounds[edit.r].matches[edit.j];
+        m.sa = null; m.sb = null; closeLayer(); edit = null; commit(); toast('Score effacé'); break;
       }
       case 'sharelink': copyText(exportLink()); break;
       case 'importlink': {
@@ -910,8 +934,7 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     }
   });
 
-  // ---------- share a tournament by link (#t=...) ----------
-  // The address always carries the current tournament, so sharing the page from Safari also shares it.
+  // ---------- send a tournament to another phone by link (#t=...) ----------
   function b64e(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
   function b64d(str) { return decodeURIComponent(escape(atob(str.replace(/-/g, '+').replace(/_/g, '/')))); }
   const canLink = !window.claude && /^https?:$/.test(location.protocol);
@@ -924,28 +947,10 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     return b64e(JSON.stringify(d));
   }
   function exportLink() { return location.origin + location.pathname + '#t=' + stateCode(); }
-  // fingerprints of the addresses this phone wrote itself, so an old address of our own is never treated as a received link
-  const OWNKEY = 'padellos-americano-own';
+  // addresses written by the previous version of the app on this phone: never treat them as a received link
   function fp(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
-  function ownList() { try { return JSON.parse(localStorage.getItem(OWNKEY) || '[]'); } catch (e) { return []; } }
-  function rememberOwn(code) { try { const l = ownList().filter(x => x !== fp(code)); l.push(fp(code)); localStorage.setItem(OWNKEY, JSON.stringify(l.slice(-200))); } catch (e) {} }
-  let hashT = null;
-  function writeHash() {
-    clearTimeout(hashT); hashT = null;
-    if (!canLink) return;
-    try {
-      if (isEmpty()) { history.replaceState(null, '', location.pathname + location.search); return; }
-      const code = stateCode(); rememberOwn(code);
-      history.replaceState(null, '', location.pathname + location.search + '#t=' + code);
-    } catch (e) {}
-  }
-  function syncHash() {
-    if (!canLink) return;
-    clearTimeout(hashT);
-    hashT = setTimeout(writeHash, 250);
-  }
-  window.addEventListener('pagehide', () => { if (hashT) writeHash(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && hashT) writeHash(); });
+  function ownList() { try { return JSON.parse(localStorage.getItem('padellos-americano-own') || '[]'); } catch (e) { return []; } }
+  function clearHash() { try { if (location.hash) history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
   function decodeCode(code) {
     try {
       const d = JSON.parse(b64d(code));
@@ -973,33 +978,21 @@ nav.tabs button[aria-current=true] { color: var(--gold); background: var(--surfa
     return i < 0 ? null : text.slice(i + 3).replace(/\s+/g, '');
   }
   function handleImport(code, fromPaste) {
+    clearHash();
     if (!code) return;
-    if (code === stateCode()) { if (fromPaste) toast('Ce tournoi est déjà chargé'); return; }
-    if (!fromPaste && ownList().includes(fp(code))) { writeHash(); return; }
+    if (code === stateCode()) { if (fromPaste) toast('Ce tournoi est déjà ouvert'); return; }
+    if (!fromPaste && ownList().includes(fp(code))) return;
     const t = decodeCode(code);
-    if (!t) { toast('Lien incomplet : renvoie le lien en entier'); syncHash(); return; }
-    const applyImport = () => { S = t; UI.tab = t.rounds.length ? 'rounds' : 'setup'; UI.round = 0; saveUI(); commit(); window.scrollTo(0, 0); toast('Tournoi chargé : ' + (t.name || 'tournoi')); };
-    syncHash();
+    if (!t) { toast('Lien incomplet : renvoie le lien en entier'); return; }
+    const applyImport = () => { S = t; UI.tab = t.rounds.length ? 'rounds' : 'setup'; UI.round = 0; saveUI(); commit(); window.scrollTo(0, 0); toast('Tournoi ouvert : ' + (t.name || 'tournoi')); };
     if (!isEmpty()) confirmBox('Charger ' + (t.name || 'ce tournoi'), 'Le tournoi en cours sur ce téléphone sera remplacé par celui du lien.', 'Charger', applyImport);
     else applyImport();
   }
-  window.addEventListener('hashchange', () => handleImport(codeFrom(location.hash)));
-  let published = [];
-  async function loadPublished() {
-    if (!canLink) return;
-    try { const r = await fetch('tournois.json', { cache: 'no-store' }); if (r.ok) published = (await r.json()).tournois || []; } catch (e) {}
-    if (UI.tab === 'setup' && !$('#layer').innerHTML) render();
-  }
+  window.addEventListener('hashchange', () => { if (canLink && codeFrom(location.hash)) handleImport(codeFrom(location.hash)); });
 
   render();
-  const shortId = canLink ? new URLSearchParams(location.search).get('t') : null;
-  if (shortId) {
-    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
-    loadPublished().then(() => { const it = published.find(x => x.id === shortId); if (it) handleImport(it.code, true); else toast('Tournoi introuvable : vérifie le lien'); });
-  } else {
-    if (codeFrom(location.hash)) handleImport(codeFrom(location.hash)); else syncHash();
-    loadPublished();
-  }
+  if (new URLSearchParams(location.search).has('t')) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {} }
+  if (canLink && codeFrom(location.hash)) handleImport(codeFrom(location.hash));
   const chip = document.querySelector('.rchip[aria-current=true]'); if (chip) chip.scrollIntoView({ inline: 'center', block: 'nearest' });
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) { navigator.serviceWorker.register('sw.js').catch(() => {}); }
 })();
